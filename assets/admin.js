@@ -1,7 +1,7 @@
 (function () {
   var SHOP = window.SHOP_KEY, API = (window.SHOPS[SHOP] || {}).api;
   var app = document.getElementById('app');
-  var KEY = 'odoburu-pass-' + SHOP, pass = '', D = null, filt = { date: '', q: '', hide: true };
+  var KEY = 'odoburu-pass-' + SHOP, pass = '', D = null, filt = { date: '', q: '', hide: true }, editNo = '';
   try { pass = sessionStorage.getItem(KEY) || ''; } catch (e) {}
   var WD = ['日', '月', '火', '水', '木', '金', '土'];
   function dl(s) { var p = String(s).split('-'); if (p.length < 3) return s; var d = new Date(+p[0], +p[1] - 1, +p[2]); return (d.getMonth() + 1) + '/' + d.getDate() + '(' + WD[d.getDay()] + ')'; }
@@ -60,6 +60,7 @@
       '<label><input type="checkbox" id="a-paid" style="width:auto"> 前払いでいただいた</label>' +
       '<label for="a-note">ご要望</label><input id="a-note"><label for="a-memo">店のメモ</label><input id="a-memo">' +
       '<p class="err" id="a-err"></p><button class="btn">予約を登録</button></form></details>' +
+      (editNo ? editRow(D.list.filter(function (y) { return y.no === editNo; })[0]) : '') +
       '<div class="card"><div class="row"><select id="f-date"><option value="">すべての受取日</option>' + opts + '</select><input id="f-q" placeholder="名前・電話・受付番号で探す" value="' + esc(filt.q) + '">' +
       '<label style="flex:0 0 auto;margin:0;font-weight:400"><input type="checkbox" id="f-hide" style="width:auto"' + (filt.hide ? ' checked' : '') + '> 取消を隠す</label></div>' +
       '<div class="scroll"><table><tr><th>受付番号</th><th>受取</th><th>お名前・電話</th><th class="r">数</th><th>支払い</th><th>状態</th><th></th></tr>' +
@@ -70,10 +71,22 @@
           '<td class="r">' + x.qty + '<br><span class="sub">' + yen(x.amount) + '</span></td>' +
           '<td><select class="mini" data-pay="' + esc(x.no) + '">' + ['未', '前払い済', '当日払い済'].map(function (p) { return '<option' + (p === x.paid ? ' selected' : '') + '>' + p + '</option>'; }).join('') + '</select></td>' +
           '<td>' + (x.state === '取消' ? '<span class="pill ng">取消</span>' : '<button class="mini" data-hand="' + esc(x.no) + '">' + (x.state === '受渡済' ? '受渡済 ✓' : '受け渡す') + '</button>') + '</td>' +
-          '<td>' + (x.state === '取消' ? '' : '<button class="mini" data-memo="' + esc(x.no) + '">メモ</button> <button class="mini" data-cancel="' + esc(x.no) + '">取消</button>') + '</td></tr>';
+          '<td>' + (x.state === '取消' ? '' : '<button class="mini" data-edit="' + esc(x.no) + '">変更</button> <button class="mini" data-memo="' + esc(x.no) + '">メモ</button> <button class="mini" data-cancel="' + esc(x.no) + '">取消</button>') + '</td></tr>';
       }).join('') + '</table></div><p class="sub">' + list.length + '件</p></div>';
     document.getElementById('f-date').value = filt.date;
     bind();
+  }
+  function editRow(x) {
+    var c = D.cfg;
+    var dO = c.dates.map(function (d) { return '<option value="' + d + '"' + (d === x.date ? ' selected' : '') + '>' + dl(d) + '</option>'; }).join('');
+    var tO = '<option value="">時間未定</option>' + c.times.map(function (t) { return '<option' + (t === x.time ? ' selected' : '') + '>' + esc(t) + '</option>'; }).join('');
+    if (!x) return '';
+    return '<form class="card" id="ef" style="border-color:var(--main)"><b>' + esc(x.no) + ' を変更</b>' +
+      '<div class="row"><div><label for="e-qty">数</label><input id="e-qty" type="number" min="1" value="' + x.qty + '"></div>' +
+      '<div><label for="e-date">受取日</label><select id="e-date">' + dO + '</select></div><div><label for="e-time">受取時間</label><select id="e-time">' + tO + '</select></div></div>' +
+      '<div class="row"><div><label for="e-name">お名前</label><input id="e-name" value="' + esc(x.name) + '"></div><div><label for="e-tel">電話番号</label><input id="e-tel" type="tel" value="' + esc(x.tel) + '"></div></div>' +
+      '<label for="e-note">ご要望</label><input id="e-note" value="' + esc(x.note) + '">' +
+      '<p class="err" id="e-err"></p><div class="row"><button class="btn" style="margin-top:8px">保存する</button><button class="btn sub2" type="button" id="e-no" style="margin-top:8px">やめる</button></div></form>';
   }
   function upd(d, done) { call(Object.assign({ op: 'update' }, d)).then(function (r) { if (!r.ok) alert(r.error); load(); }); }
   function bind() {
@@ -86,6 +99,22 @@
     app.querySelectorAll('[data-pay]').forEach(function (s) { s.onchange = function () { upd({ no: s.dataset.pay, paid: s.value }); }; });
     app.querySelectorAll('[data-hand]').forEach(function (b) { b.onclick = function () { var x = D.list.filter(function (y) { return y.no === b.dataset.hand; })[0]; upd({ no: x.no, state: x.state === '受渡済' ? '予約' : '受渡済' }); }; });
     app.querySelectorAll('[data-cancel]').forEach(function (b) { b.onclick = function () { if (confirm(b.dataset.cancel + ' を取り消しますか？（元に戻せません）')) upd({ no: b.dataset.cancel, state: '取消' }); }; });
+    app.querySelectorAll('[data-edit]').forEach(function (b) { b.onclick = function () { editNo = editNo === b.dataset.edit ? '' : b.dataset.edit; render(); var f = document.getElementById('ef'); if (f) f.scrollIntoView({ behavior: 'smooth', block: 'start' }); }; });
+    var ef = document.getElementById('ef');
+    if (ef) {
+      document.getElementById('e-no').onclick = function () { editNo = ''; render(); };
+      ef.onsubmit = function (e) {
+        e.preventDefault();
+        var v = function (id) { return document.getElementById(id).value.trim(); };
+        var btn = ef.querySelector('.btn'); btn.disabled = true; btn.textContent = '保存しています…';
+        call({ op: 'edit', no: editNo, qty: +v('e-qty'), date: v('e-date'), time: v('e-time'), name: v('e-name'), tel: v('e-tel'), note: v('e-note') })
+          .then(function (r) {
+            if (!r.ok) { btn.disabled = false; btn.textContent = '保存する'; document.getElementById('e-err').textContent = r.error; return; }
+            if (r.over) alert('保存しました。※合計が上限数を超えています');
+            editNo = ''; load();
+          });
+      };
+    }
     app.querySelectorAll('[data-memo]').forEach(function (b) { b.onclick = function () { var x = D.list.filter(function (y) { return y.no === b.dataset.memo; })[0]; var m = prompt('店のメモ', x.memo); if (m !== null) upd({ no: x.no, memo: m }); }; });
     document.getElementById('af').onsubmit = function (e) {
       e.preventDefault();
