@@ -34,3 +34,25 @@ th{color:var(--sub);font-weight:500;font-size:.8rem}
 .stats div{background:var(--soft);border-radius:8px;padding:8px 10px}
 .stats b{display:block;font-size:1.3rem}
 .done td{color:var(--sub)} .cancel td{text-decoration:line-through;color:var(--sub)}
+.tabs{display:flex;gap:6px;margin-bottom:10px}
+.tab{font:inherit;font-weight:700;padding:8px 16px;border-radius:99px;border:1px solid var(--line);background:#fff;color:var(--main);cursor:pointer}
+.tab.on{background:var(--main);color:#fff;border-color:var(--main)}
+.dh{margin:0 0 6px;font-size:1.15rem;color:var(--main)}
+.ck{width:34px;text-align:center}
+.ck input{width:20px;height:20px}
+.num{white-space:nowrap}
+.box{display:inline-block;width:16px;height:16px;border:1.5px solid #333;text-align:center;line-height:14px;font-size:12px}
+@media print{
+  @page{size:A4;margin:12mm}
+  body{background:#fff;font-size:11pt}
+  .wrap{max-width:none;padding:0}
+  .noprint{display:none!important}
+  .printonly{display:inline-block!important}
+  .card{border:0;padding:0;margin:0 0 8mm;break-inside:avoid}
+  .day table{border:1px solid #999}
+  th,td{border-bottom:1px solid #bbb;padding:4px 6px}
+  .done td{color:#000}
+  h1{font-size:16pt}
+}
+.printonly{display:none}
+.mini{white-space:nowrap}
