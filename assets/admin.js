@@ -1,7 +1,7 @@
 (function () {
   var SHOP = window.SHOP_KEY, API = (window.SHOPS[SHOP] || {}).api;
   var app = document.getElementById('app');
-  var VIEW = 'res', P = null, basis = 'make';
+  var VIEW = 'res', P = null, M = null, mOpen = '', basis = 'make';
   var KEY = 'odoburu-pass-' + SHOP, pass = '', D = null, filt = { date: '', q: '', hide: true }, editNo = '';
   try { pass = sessionStorage.getItem(KEY) || ''; } catch (e) {}
   var WD = ['日', '月', '火', '水', '木', '金', '土'];
@@ -91,11 +91,12 @@
   }
   function nav() {
     return '<div class="tabs noprint"><button class="tab' + (VIEW === 'res' ? ' on' : '') + '" data-view="res">予約</button>' +
-      '<button class="tab' + (VIEW === 'plan' ? ' on' : '') + '" data-view="plan">仕込み予定</button></div>';
+      '<button class="tab' + (VIEW === 'plan' ? ' on' : '') + '" data-view="plan">仕込み予定</button>' +
+      '<button class="tab' + (VIEW === 'menu' ? ' on' : '') + '" data-view="menu">メニュー・分量</button></div>';
   }
   function bindNav() {
     app.querySelectorAll('[data-view]').forEach(function (b) {
-      b.onclick = function () { VIEW = b.dataset.view; if (VIEW === 'plan') loadPlan(); else load(); };
+      b.onclick = function () { VIEW = b.dataset.view; mOpen = ''; if (VIEW === 'plan') loadPlan(); else if (VIEW === 'menu') loadMenu(); else load(); };
     });
   }
   function loadPlan() {
@@ -152,6 +153,75 @@
       call({ op: 'planAdd', date: v('p-date'), task: v('p-task'), per: v('p-per'), unit: v('p-unit') }).then(function (r) {
         if (!r.ok) { document.getElementById('p-err').textContent = r.error; return; }
         loadPlan();
+      });
+    };
+  }
+  function loadMenu() {
+    app.innerHTML = nav() + '<p class="sub">読み込んでいます…</p>'; bindNav();
+    call({ op: 'menu' }).then(function (r) {
+      if (!r.ok) { if (r.code === 'auth') { pass = ''; return login(r.error); } app.innerHTML = nav() + '<p class="err">' + esc(r.error) + '</p>'; bindNav(); return; }
+      M = r; renderMenu();
+    }).catch(function () { app.innerHTML = nav() + '<p class="err">読み込めませんでした。電波を確認して開き直してください。</p>'; bindNav(); });
+  }
+  function renderMenu() {
+    var n = basis === 'make' ? M.make : M.total, u = esc(M.unit);
+    var dishes = [], by = {}, sum = {}, keys = [];
+    M.list.slice().sort(function (a, b) { return a.order - b.order; }).forEach(function (x) {
+      if (!by[x.dish]) { by[x.dish] = []; dishes.push(x.dish); }
+      by[x.dish].push(x);
+      if (x.item && x.per) { var k = x.item + '\t' + x.unit; if (!(k in sum)) { sum[k] = 0; keys.push(k); } sum[k] += x.per; }
+    });
+    app.innerHTML = nav() +
+      '<div class="shop">' + esc(M.shop) + '</div><h1>' + esc(M.product) + ' メニュー・分量</h1>' +
+      '<div class="card"><div class="row"><div><b>必要量は ' + n + u + ' 分で計算</b><br><span class="sub">仕込み数 ' + M.make + u + '／今の予約 ' + M.total + u + '　料理 ' + dishes.length + '品</span></div>' +
+      '<div class="noprint" style="flex:0 0 auto"><button class="mini" id="bs">' + (basis === 'make' ? '今の予約数で計算' : '仕込み数で計算') + '</button> <button class="mini" id="pr">印刷する</button> <button class="mini" id="rl">更新</button></div></div></div>' +
+      (dishes.length ? '' : '<div class="card"><p class="sub">まだメニューがありません。下の「料理・食材を追加する」から入れてください。</p></div>') +
+      dishes.map(function (d) {
+        return '<div class="card day"><div class="row"><h2 class="dh" style="flex:1 1 auto">' + esc(d) + '</h2><button class="mini noprint" style="flex:0 0 auto" data-addto="' + esc(d) + '">食材を追加</button></div>' +
+          '<table><tr><th>食材</th><th class="r">1' + u + 'あたり</th><th>単位</th><th class="r">必要量</th><th class="noprint"></th></tr>' +
+          by[d].map(function (x) {
+            return '<tr><td><input class="noprint" data-item="' + esc(x.id) + '" value="' + esc(x.item) + '" placeholder="（料理全体）"><span class="printonly">' + esc(x.item || '料理全体') + '</span>' +
+              (x.memo ? '<br><span class="sub">' + esc(x.memo) + '</span>' : '') + '</td>' +
+              '<td class="r"><input class="noprint per-in" type="number" step="any" inputmode="decimal" data-per="' + esc(x.id) + '" value="' + (x.per || '') + '"><span class="printonly">' + (x.per || '') + '</span></td>' +
+              '<td>' + esc(x.unit) + '</td><td class="r num">' + (x.per ? amount(x.per, x.unit, n) : '') + '</td>' +
+              '<td class="noprint"><button class="mini" data-mdel="' + esc(x.id) + '">削除</button></td></tr>';
+          }).join('') + '</table></div>';
+      }).join('') +
+      (keys.length ? '<div class="card"><b>食材の合計</b> <span class="sub">同じ名前・同じ単位の食材をまとめた量（発注の目安）</span><table><tr><th>食材</th><th class="r">1' + u + 'あたり</th><th class="r">必要量</th></tr>' +
+        keys.map(function (k) { var p = k.split('\t'); return '<tr><td>' + esc(p[0]) + '</td><td class="r">' + Math.round(sum[k] * 100) / 100 + esc(p[1]) + '</td><td class="r num">' + amount(sum[k], p[1], n) + '</td></tr>'; }).join('') +
+        '</table></div>' : '') +
+      '<details class="card noprint" id="madd"' + (mOpen ? ' open' : '') + '><summary><b>料理・食材を追加する</b></summary><form id="mf"><div class="row">' +
+      '<div><label for="m-dish">料理名</label><input id="m-dish" list="m-dishes" placeholder="例：ローストビーフ" value="' + esc(mOpen) + '"></div>' +
+      '<div><label for="m-item">食材（空なら料理全体の量）</label><input id="m-item" placeholder="例：牛もも肉"></div></div>' +
+      '<div class="row"><div><label for="m-per">1' + u + 'あたりの量</label><input id="m-per" type="number" step="any" inputmode="decimal"></div>' +
+      '<div><label for="m-unit">単位</label><input id="m-unit" value="g"></div></div>' +
+      '<label for="m-memo">メモ（任意）</label><input id="m-memo"><p class="err" id="m-err"></p><button class="btn">追加する</button></form></details>' +
+      '<datalist id="m-dishes">' + dishes.map(function (d) { return '<option value="' + esc(d) + '">'; }).join('') + '</datalist>';
+    bindNav();
+    document.getElementById('bs').onclick = function () { basis = basis === 'make' ? 'now' : 'make'; renderMenu(); };
+    document.getElementById('pr').onclick = function () { window.print(); };
+    document.getElementById('rl').onclick = loadMenu;
+    var save = function (el, data) { el.disabled = true; call(Object.assign({ op: 'menuEdit', id: el.dataset.per || el.dataset.item }, data)).then(function (r) { if (!r.ok) alert(r.error); loadMenu(); }); };
+    app.querySelectorAll('[data-per]').forEach(function (el) { el.onchange = function () { save(el, { per: el.value.trim() }); }; });
+    app.querySelectorAll('[data-item]').forEach(function (el) { el.onchange = function () { save(el, { item: el.value.trim() }); }; });
+    app.querySelectorAll('[data-mdel]').forEach(function (b) {
+      b.onclick = function () { if (confirm('この行を消しますか？')) call({ op: 'menuDel', id: b.dataset.mdel }).then(loadMenu); };
+    });
+    app.querySelectorAll('[data-addto]').forEach(function (b) {
+      b.onclick = function () {
+        var box = document.getElementById('madd'); box.open = true;
+        document.getElementById('m-dish').value = b.dataset.addto;
+        box.scrollIntoView({ behavior: 'smooth', block: 'start' }); document.getElementById('m-item').focus();
+      };
+    });
+    if (mOpen) document.getElementById('m-item').focus();
+    document.getElementById('mf').onsubmit = function (e) {
+      e.preventDefault();
+      var v = function (id) { return document.getElementById(id).value.trim(); };
+      var btn = this.querySelector('.btn'); btn.disabled = true;
+      call({ op: 'menuAdd', dish: v('m-dish'), item: v('m-item'), per: v('m-per'), unit: v('m-unit'), memo: v('m-memo') }).then(function (r) {
+        if (!r.ok) { btn.disabled = false; document.getElementById('m-err').textContent = r.error; return; }
+        mOpen = v('m-dish'); loadMenu();
       });
     };
   }
