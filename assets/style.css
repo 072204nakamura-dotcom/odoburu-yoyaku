@@ -56,3 +56,5 @@ th{color:var(--sub);font-weight:500;font-size:.8rem}
 }
 .printonly{display:none}
 .mini{white-space:nowrap}
+.per-in{width:96px;text-align:right}
+.tabs{flex-wrap:wrap}
