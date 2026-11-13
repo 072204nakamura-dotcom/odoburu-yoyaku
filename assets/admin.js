@@ -1,6 +1,7 @@
 (function () {
   var SHOP = window.SHOP_KEY, API = (window.SHOPS[SHOP] || {}).api;
   var app = document.getElementById('app');
+  var VIEW = 'res', P = null, basis = 'make';
   var KEY = 'odoburu-pass-' + SHOP, pass = '', D = null, filt = { date: '', q: '', hide: true }, editNo = '';
   try { pass = sessionStorage.getItem(KEY) || ''; } catch (e) {}
   var WD = ['日', '月', '火', '水', '木', '金', '土'];
@@ -45,7 +46,7 @@
     var opts = c.dates.map(function (d) { return '<option value="' + d + '">' + dl(d) + '</option>'; }).join('');
     var topts = '<option value="">時間未定</option>' + c.times.map(function (t) { return '<option>' + esc(t) + '</option>'; }).join('');
     app.innerHTML =
-      '<div class="row"><div><div class="shop">' + esc(c.shop) + '</div><h1>' + esc(c.product) + ' 予約管理</h1></div>' +
+      nav() + '<div class="row"><div><div class="shop">' + esc(c.shop) + '</div><h1>' + esc(c.product) + ' 予約管理</h1></div>' +
       '<div style="flex:0 0 auto" class="row"><button class="mini" id="rl">更新</button><button class="mini" id="op">' + (c.stopped ? 'Web受付を再開' : 'Web受付を停止') + '</button><button class="mini" id="tl">LINEテスト</button></div></div>' +
       '<div class="card"><div class="stats">' +
       '<div>予約数<b>' + D.total + ' / ' + D.cap + u + '</b></div><div>残り<b>' + Math.max(0, D.cap - D.total) + u + '</b></div>' +
@@ -88,8 +89,75 @@
       '<label for="e-note">ご要望</label><input id="e-note" value="' + esc(x.note) + '">' +
       '<p class="err" id="e-err"></p><div class="row"><button class="btn" style="margin-top:8px">保存する</button><button class="btn sub2" type="button" id="e-no" style="margin-top:8px">やめる</button></div></form>';
   }
+  function nav() {
+    return '<div class="tabs noprint"><button class="tab' + (VIEW === 'res' ? ' on' : '') + '" data-view="res">予約</button>' +
+      '<button class="tab' + (VIEW === 'plan' ? ' on' : '') + '" data-view="plan">仕込み予定</button></div>';
+  }
+  function bindNav() {
+    app.querySelectorAll('[data-view]').forEach(function (b) {
+      b.onclick = function () { VIEW = b.dataset.view; if (VIEW === 'plan') loadPlan(); else load(); };
+    });
+  }
+  function loadPlan() {
+    app.innerHTML = nav() + '<p class="sub">読み込んでいます…</p>'; bindNav();
+    call({ op: 'plan' }).then(function (r) {
+      if (!r.ok) { if (r.code === 'auth') { pass = ''; return login(r.error); } app.innerHTML = nav() + '<p class="err">' + esc(r.error) + '</p>'; bindNav(); return; }
+      P = r; renderPlan();
+    }).catch(function () { app.innerHTML = nav() + '<p class="err">読み込めませんでした。電波を確認して開き直してください。</p>'; bindNav(); });
+  }
+  function dkey(d) { var m = String(d).match(/(\d+)\D(\d+)/); return m ? (+m[1]) * 100 + (+m[2]) : 9999; }
+  function amount(per, unit, n) {
+    var v = per * n;
+    if (unit === 'g' && v >= 1000) return (Math.round(v / 100) / 10).toLocaleString('ja-JP') + 'kg';
+    if (unit === 'ml' && v >= 1000) return (Math.round(v / 100) / 10).toLocaleString('ja-JP') + 'L';
+    return Math.round(v).toLocaleString('ja-JP') + unit;
+  }
+  function renderPlan() {
+    var n = basis === 'make' ? P.make : P.total, u = esc(P.unit);
+    var days = {};
+    P.list.slice().sort(function (a, b) { return dkey(a.date) - dkey(b.date) || a.order - b.order; })
+      .forEach(function (x) { (days[x.date] = days[x.date] || []).push(x); });
+    var done = P.list.filter(function (x) { return x.done; }).length;
+    app.innerHTML = nav() +
+      '<div class="shop">' + esc(P.shop) + '</div><h1>' + esc(P.product) + ' 仕込み予定</h1>' +
+      '<div class="card"><div class="row"><div><b>必要量は ' + n + u + ' 分で計算</b><br><span class="sub">仕込み数 ' + P.make + u + '／今の予約 ' + P.total + u + '／販売上限 ' + P.cap + u + '　完了 ' + done + '/' + P.list.length + '</span></div>' +
+      '<div class="noprint" style="flex:0 0 auto"><button class="mini" id="bs">' + (basis === 'make' ? '今の予約数で計算' : '仕込み数で計算') + '</button> <button class="mini" id="pr">印刷する</button> <button class="mini" id="rl">更新</button></div></div></div>' +
+      Object.keys(days).map(function (d) {
+        return '<div class="card day"><h2 class="dh">' + esc(d) + '</h2><table><tr><th class="ck">済</th><th>作業</th><th class="r">必要量</th><th class="noprint"></th></tr>' +
+          days[d].map(function (x) {
+            return '<tr class="' + (x.done ? 'done' : '') + '"><td class="ck"><input type="checkbox" class="noprint" data-done="' + esc(x.id) + '"' + (x.done ? ' checked' : '') + '><span class="box printonly">' + (x.done ? '✓' : '') + '</span></td>' +
+              '<td>' + esc(x.task) + (x.done && x.doneAt ? '<br><span class="sub noprint">済 ' + esc(x.doneAt) + '</span>' : '') + (x.memo ? '<br><span class="sub">' + esc(x.memo) + '</span>' : '') + '</td>' +
+              '<td class="r num">' + (x.per ? amount(x.per, x.unit, n) + '<br><span class="sub">1' + u + ' ' + x.per + esc(x.unit) + '</span>' : '') + '</td>' +
+              '<td class="noprint"><button class="mini" data-del="' + esc(x.id) + '">削除</button></td></tr>';
+          }).join('') + '</table></div>';
+      }).join('') +
+      '<details class="card noprint"><summary><b>作業を追加する</b></summary><form id="pf"><div class="row">' +
+      '<div><label for="p-date">日付</label><input id="p-date" placeholder="12/30"></div>' +
+      '<div><label for="p-per">1' + u + 'あたりの量（任意）</label><input id="p-per" type="number" step="any"></div>' +
+      '<div><label for="p-unit">単位</label><input id="p-unit" placeholder="g"></div></div>' +
+      '<label for="p-task">作業</label><input id="p-task" placeholder="例：ローストビーフ 真空"><p class="err" id="p-err"></p><button class="btn">追加する</button></form></details>';
+    bindNav();
+    document.getElementById('bs').onclick = function () { basis = basis === 'make' ? 'now' : 'make'; renderPlan(); };
+    document.getElementById('pr').onclick = function () { window.print(); };
+    document.getElementById('rl').onclick = loadPlan;
+    app.querySelectorAll('[data-done]').forEach(function (b) {
+      b.onchange = function () { b.disabled = true; call({ op: 'planDone', id: b.dataset.done, done: b.checked }).then(function (r) { if (!r.ok) alert(r.error); loadPlan(); }); };
+    });
+    app.querySelectorAll('[data-del]').forEach(function (b) {
+      b.onclick = function () { if (confirm('この作業を消しますか？')) call({ op: 'planDel', id: b.dataset.del }).then(loadPlan); };
+    });
+    document.getElementById('pf').onsubmit = function (e) {
+      e.preventDefault();
+      var v = function (id) { return document.getElementById(id).value.trim(); };
+      call({ op: 'planAdd', date: v('p-date'), task: v('p-task'), per: v('p-per'), unit: v('p-unit') }).then(function (r) {
+        if (!r.ok) { document.getElementById('p-err').textContent = r.error; return; }
+        loadPlan();
+      });
+    };
+  }
   function upd(d, done) { call(Object.assign({ op: 'update' }, d)).then(function (r) { if (!r.ok) alert(r.error); load(); }); }
   function bind() {
+    bindNav();
     document.getElementById('rl').onclick = load;
     document.getElementById('tl').onclick = function () { call({ op: 'testLine' }).then(function (r) { alert(r.ok ? 'LINEに送りました' : r.error); }); };
     document.getElementById('op').onclick = function () { call({ op: 'setOpen', open: D.cfg.stopped }).then(load); };
