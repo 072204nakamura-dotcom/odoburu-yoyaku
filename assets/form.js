@@ -1,7 +1,7 @@
 (function () {
   var SHOP = window.SHOP_KEY, API = (window.SHOPS[SHOP] || {}).api;
   var app = document.getElementById('app');
-  var cfg = null, sel = { date: '', time: '', qty: 1 }, rid = Math.random().toString(16).slice(2, 12);
+  var cfg = null, sel = { date: '', time: '', qty: 1, items: {} }, rid = Math.random().toString(16).slice(2, 12);
   var WD = ['日', '月', '火', '水', '木', '金', '土'];
   function dl(s) { var p = s.split('-'); var d = new Date(+p[0], +p[1] - 1, +p[2]); return (d.getMonth() + 1) + '/' + d.getDate() + '(' + WD[d.getDay()] + ')'; }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
@@ -10,17 +10,33 @@
     var u = API + '?action=' + action + (data ? '&data=' + encodeURIComponent(JSON.stringify(data)) : '');
     return fetch(u).then(function (r) { return r.json(); });
   }
+  // 追加商品（ピザなど）。GASが古いとき・商品がないときは空で、今までどおりの画面になる
+  function exs() { return (cfg && cfg.extras) || []; }
+  function exTitle() { return cfg.extraTitle || 'ピザ'; }
+  function exUnit() { return cfg.extraUnit || '枚'; }
+  function exNum(x) { return sel.items[x.id] || 0; }
+  function exCount() { return exs().reduce(function (n, x) { return n + exNum(x); }, 0); }
+  function total() { return cfg.price * sel.qty + exs().reduce(function (n, x) { return n + x.price * exNum(x); }, 0); }
+  // 注文の中身を1行ずつ（HTML用にエスケープ済み）
+  function lines() {
+    var a = [];
+    if (sel.qty > 0) a.push(esc(cfg.product) + ' × ' + sel.qty + esc(cfg.unit));
+    exs().forEach(function (x) { if (exNum(x) > 0) a.push(esc(x.name) + ' × ' + exNum(x) + esc(exUnit())); });
+    return a;
+  }
   function load() {
     app.innerHTML = '<p class="sub">読み込んでいます…</p>';
-    call('config').then(function (c) { cfg = c; if (!sel.date && c.dates.length === 1) sel.date = c.dates[0]; if (location.hash === '#cancel') cancelView(); else form(); })
-      .catch(function () { app.innerHTML = '<p class="err">読み込めませんでした。電波の良い所でページを開き直してください。</p>'; });
+    call('config').then(function (c) {
+      if (!c || !c.dates) throw new Error('config');
+      cfg = c; if (!sel.date && c.dates.length === 1) sel.date = c.dates[0]; if (location.hash === '#cancel') cancelView(); else form();
+    }).catch(function () { app.innerHTML = '<p class="err">読み込めませんでした。電波の良い所でページを開き直してください。</p>'; });
   }
   function slotLeft(d, t) { var v = cfg.slots[d + ' ' + t]; return v === null || v === undefined ? Infinity : v; }
   function head() {
     return '<div class="shop">' + esc(cfg.shop) + '</div><h1>' + esc(cfg.product) + ' ご予約</h1>' +
       '<div class="card"><div>' + esc(cfg.desc) + '</div><div class="price">' + yen(cfg.price) + '<span class="sub">（税込）／1' + esc(cfg.unit) + '</span></div>' +
       '<div class="sub">お渡し：' + cfg.dates.map(dl).join('・') + '　' + esc(cfg.place) + '</div>' +
-      (cfg.open ? '<div class="sub">残り ' + cfg.remain + esc(cfg.unit) + '</div>' : '') + '</div>';
+      (cfg.open ? '<div class="sub">' + (cfg.remain > 0 ? '残り ' + cfg.remain + esc(cfg.unit) : esc(cfg.product) + 'は予定数に達しました') + '</div>' : '') + '</div>';
   }
   function foot() {
     return '<p class="sub" style="text-align:center;margin-top:24px"><a href="#cancel" id="cl">ご予約のキャンセルはこちら</a></p>';
@@ -30,16 +46,35 @@
       app.innerHTML = head() + '<div class="card"><b>' + (cfg.stopped ? '現在、Webでのご予約は受け付けていません。' : '予定数に達したため、受付を終了しました。') + '</b>' +
         '<p>お問い合わせはお電話で：<b>' + esc(cfg.tel) + '</b></p></div>' + foot(); bindFoot(); return;
     }
-    var max = Math.min(cfg.maxPer, cfg.remain), qo = '';
-    for (var i = 1; i <= max; i++) qo += '<option' + (i === sel.qty ? ' selected' : '') + '>' + i + '</option>';
+    var ex = exs(), max = Math.min(cfg.maxPer, cfg.remain), min = ex.length ? 0 : 1, qo = '';
+    if (sel.qty > max) sel.qty = max;
+    if (sel.qty < min) sel.qty = min;
+    for (var i = min; i <= max; i++) qo += '<option' + (i === sel.qty ? ' selected' : '') + '>' + i + '</option>';
+    var qtyLabel = cfg.unit === '台' ? '台数' : '個数';
+    var exHtml = '';
+    if (ex.length) {
+      var exMax = cfg.extraMax || 10;
+      exHtml = '<label>' + esc(exTitle()) + '</label>' +
+        (cfg.remain > 0 ? '<div class="sub">' + esc(cfg.product) + 'なしで、' + esc(exTitle()) + 'だけのご予約もできます</div>' : '') +
+        ex.map(function (x) {
+          var o = '';
+          for (var k = 0; k <= exMax; k++) o += '<option value="' + k + '"' + (k === exNum(x) ? ' selected' : '') + '>' + k + esc(exUnit()) + '</option>';
+          return '<div class="exrow"><div><b>' + esc(x.name) + '</b>　' + yen(x.price) + '<span class="sub">（税込）</span>' +
+            (x.desc ? '<br><span class="sub">' + esc(x.desc) + '</span>' : '') + '</div>' +
+            '<select data-ex="' + esc(x.id) + '" aria-label="' + esc(x.name) + 'の数">' + o + '</select></div>';
+        }).join('') +
+        '<div class="sub">' + exMax + esc(exUnit()) + 'より多いときはお電話でご相談ください</div>' +
+        '<p class="sum">合計 ' + yen(total()) + '<span class="sub">（税込）</span></p>';
+    }
     var dates = cfg.dates.map(function (d) { return '<button type="button" class="chip" data-date="' + d + '" aria-pressed="' + (sel.date === d) + '">' + dl(d) + '</button>'; }).join('');
     var times = sel.date ? cfg.times.map(function (t) {
       var left = slotLeft(sel.date, t), full = left < sel.qty;
       return '<button type="button" class="chip" data-time="' + esc(t) + '" aria-pressed="' + (sel.time === t) + '"' + (full ? ' disabled' : '') + '>' + esc(t) + (left !== Infinity && !full ? '<span class="sub">（残' + left + '）</span>' : '') + '</button>';
     }).join('') : '<span class="sub">先に受取日を選んでください</span>';
     app.innerHTML = head() + '<form class="card" id="f">' +
-      '<label for="qty">' + esc(cfg.unit === '台' ? '台数' : '個数') + '</label><select id="qty">' + qo + '</select>' +
-      '<div class="sub">' + cfg.maxPer + esc(cfg.unit) + 'より多いときはお電話でご相談ください</div>' +
+      '<label for="qty">' + (ex.length ? esc(cfg.product) + 'の' : '') + esc(qtyLabel) + '</label><select id="qty">' + qo + '</select>' +
+      (max > 0 ? '<div class="sub">' + cfg.maxPer + esc(cfg.unit) + 'より多いときはお電話でご相談ください</div>' : '') +
+      exHtml +
       '<label>受取日</label><div class="chips">' + dates + '</div>' +
       '<label>受取時間</label><div class="chips">' + times + '</div>' +
       '<label for="nm">お名前</label><input id="nm" autocomplete="name" value="' + esc(sel.name || '') + '">' +
@@ -56,22 +91,27 @@
       form();
     });
     document.getElementById('qty').addEventListener('change', function () { keep(); form(); });
+    f.querySelectorAll('select[data-ex]').forEach(function (s) { s.addEventListener('change', function () { keep(); form(); }); });
     f.addEventListener('submit', function (e) { e.preventDefault(); keep(); check(); });
   }
   function keep() {
     var q = document.getElementById('qty'); if (q) sel.qty = +q.value;
+    app.querySelectorAll('select[data-ex]').forEach(function (s) { sel.items[s.dataset.ex] = +s.value; });
     ['nm', 'tel', 'note'].forEach(function (id) { var el = document.getElementById(id); if (el) sel[id === 'nm' ? 'name' : id] = el.value.trim(); });
     if (sel.time && slotLeft(sel.date, sel.time) < sel.qty) sel.time = '';
   }
   function check() {
     var tel = (sel.tel || '').replace(/[^\d]/g, '');
+    if (sel.qty < 1 && !exCount()) return form(cfg.product + 'か' + exTitle() + 'の数を選んでください');
     if (!sel.date) return form('受取日を選んでください');
     if (!sel.time) return form('受取時間を選んでください');
     if (!sel.name) return form('お名前を入れてください');
     if (tel.length < 10 || tel.length > 11) return form('電話番号を確認してください');
+    var items = {};
+    exs().forEach(function (x) { if (exNum(x) > 0) items[x.id] = exNum(x); });
     app.innerHTML = head() + '<div class="card"><b>ご予約内容の確認</b><table>' +
-      '<tr><th>商品</th><td>' + esc(cfg.product) + ' × ' + sel.qty + esc(cfg.unit) + '</td></tr>' +
-      '<tr><th>金額</th><td>' + yen(cfg.price * sel.qty) + '（税込）</td></tr>' +
+      '<tr><th>商品</th><td>' + lines().join('<br>') + '</td></tr>' +
+      '<tr><th>金額</th><td>' + yen(total()) + '（税込）</td></tr>' +
       '<tr><th>受取</th><td>' + dl(sel.date) + ' ' + esc(sel.time) + '<br>' + esc(cfg.place) + '</td></tr>' +
       '<tr><th>お名前</th><td>' + esc(sel.name) + ' 様</td></tr><tr><th>電話番号</th><td>' + esc(tel) + '</td></tr>' +
       (sel.note ? '<tr><th>ご要望</th><td>' + esc(sel.note) + '</td></tr>' : '') + '</table>' +
@@ -79,12 +119,15 @@
     document.getElementById('back').onclick = function () { form(); };
     document.getElementById('go').onclick = function () {
       this.disabled = true; this.textContent = '送信しています…';
-      call('reserve', { qty: sel.qty, date: sel.date, time: sel.time, name: sel.name, tel: tel, note: sel.note, rid: rid })
+      var data = { qty: sel.qty, date: sel.date, time: sel.time, name: sel.name, tel: tel, note: sel.note, rid: rid };
+      if (exCount()) data.items = items;
+      call('reserve', data)
         .then(function (r) {
-          if (!r.ok) { cfg = null; return call('config').then(function (c) { cfg = c; sel.time = r.code === 'slotfull' ? '' : sel.time; form(r.error); }); }
+          if (!r.ok) { return call('config').then(function (c) { if (c && c.dates) cfg = c; sel.time = r.code === 'slotfull' ? '' : sel.time; form(r.error); }); }
           app.innerHTML = head() + '<div class="card"><p>ご予約を承りました。ありがとうございます。</p>' +
             '<p class="sub">受付番号</p><p class="big">' + esc(r.no) + '</p>' +
-            '<p>' + dl(sel.date) + ' ' + esc(sel.time) + ' に ' + esc(cfg.place) + ' でお渡しします。<br>' + esc(cfg.product) + ' × ' + sel.qty + esc(cfg.unit) + '　' + yen(cfg.price * sel.qty) + '（税込）</p>' +
+            '<p>' + dl(sel.date) + ' ' + esc(sel.time) + ' に ' + esc(cfg.place) + ' でお渡しします。<br>' +
+            (exCount() ? lines().join('<br>') + '<br>合計 ' : lines().join('') + '　') + yen(total()) + '（税込）</p>' +
             '<p class="sub">この画面を保存（スクリーンショット）しておいてください。変更・キャンセルはお電話で：' + esc(cfg.tel) + '</p></div>';
         })
         .catch(function () { form('送信できたか確認できませんでした。お手数ですがお電話（' + cfg.tel + '）でご確認ください。'); });
@@ -108,9 +151,10 @@
       var btn = this.querySelector('.btn'); btn.disabled = true; btn.textContent = '確認しています…';
       call('lookup', { no: cx.no, tel: cx.tel }).then(function (r) {
         if (!r.ok) return cancelView(r.error);
+        var what = [r.qty > 0 ? esc(r.product) + ' × ' + r.qty + esc(r.unit) : '', esc(r.extra || '')].filter(String).join('<br>');
         app.innerHTML = head() + '<div class="card"><b>このご予約をキャンセルしますか？</b><table>' +
           '<tr><th>受付番号</th><td>' + esc(r.no) + '</td></tr>' +
-          '<tr><th>内容</th><td>' + esc(r.product) + ' × ' + r.qty + esc(r.unit) + '　' + yen(r.amount) + '</td></tr>' +
+          '<tr><th>内容</th><td>' + what + '　' + yen(r.amount) + '</td></tr>' +
           '<tr><th>受取</th><td>' + dl(r.date) + ' ' + esc(r.time || '時間未定') + '</td></tr></table>' +
           '<button class="btn" id="cgo" style="background:var(--ng)">キャンセルする</button><button class="btn sub2" id="cno">やめる</button></div>';
         document.getElementById('cno').onclick = function () { form(); };

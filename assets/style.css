@@ -58,3 +58,7 @@ th{color:var(--sub);font-weight:500;font-size:.8rem}
 .mini{white-space:nowrap}
 .per-in{width:96px;text-align:right}
 .tabs{flex-wrap:wrap}
+.exrow{display:flex;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}
+.exrow>div{flex:1 1 auto}
+.exrow select{flex:0 0 96px;width:96px}
+.sum{font-weight:700;font-size:1.1rem;text-align:right;margin:12px 0 0}

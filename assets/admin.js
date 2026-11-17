@@ -31,10 +31,22 @@
     var paid = live.filter(function (x) { return x.paid !== '未'; }).reduce(function (n, x) { return n + x.amount; }, 0);
     var handed = live.filter(function (x) { return x.state === '受渡済'; }).reduce(function (n, x) { return n + x.qty; }, 0);
     var u = esc(c.unit);
+    // 追加商品（ピザなど）。古いGASのときは何も出ない
+    var EX = D.extras || [], exT = esc(c.extraTitle || 'ピザ'), exU = esc(c.extraUnit || '枚');
+    var exN = function (x) { return (x.ex || []).reduce(function (a, e) { return a + e.n; }, 0); };
+    var exAll = live.reduce(function (a, x) { return a + exN(x); }, 0);
+    var exNames = EX.map(function (x) { return x.name; });
+    live.forEach(function (x) { (x.ex || []).forEach(function (e) { if (exNames.indexOf(e.name) < 0) exNames.push(e.name); }); });
+    var exCard = (EX.length || exAll) ? '<div class="card scroll"><b>' + exT + 'の数</b><table><tr><th>種類</th>' + c.dates.map(function (d) { return '<th class="r">' + dl(d) + '</th>'; }).join('') + '<th class="r">合計</th></tr>' +
+      exNames.map(function (nm) {
+        var per = function (d) { return live.reduce(function (a, x) { return a + (d && x.date !== d ? 0 : (x.ex || []).reduce(function (b, e) { return b + (e.name === nm ? e.n : 0); }, 0)); }, 0); };
+        return '<tr><td>' + esc(nm) + '</td>' + c.dates.map(function (d) { return '<td class="r">' + per(d) + '</td>'; }).join('') + '<td class="r"><b>' + per('') + '</b></td></tr>';
+      }).join('') + '</table></div>' : '';
     var slotRows = c.times.concat(['時間未定']).map(function (t) {
       return '<tr><td>' + esc(t) + '</td>' + c.dates.map(function (d) {
         var n = t === '時間未定' ? live.filter(function (x) { return x.date === d && !x.time; }).reduce(function (a, x) { return a + x.qty; }, 0) : (D.slots[d + ' ' + t] || 0);
-        return '<td class="r">' + n + '</td>';
+        var pz = live.filter(function (x) { return x.date === d && (t === '時間未定' ? !x.time : x.time === t); }).reduce(function (a, x) { return a + exN(x); }, 0);
+        return '<td class="r">' + n + (pz ? '<br><span class="sub">' + exT + ' ' + pz + exU + '</span>' : '') + '</td>';
       }).join('') + '</tr>';
     }).join('');
     var list = D.list.slice().reverse().filter(function (x) {
@@ -50,12 +62,13 @@
       '<div style="flex:0 0 auto" class="row"><button class="mini" id="rl">更新</button><button class="mini" id="op">' + (c.stopped ? 'Web受付を再開' : 'Web受付を停止') + '</button><button class="mini" id="tl">LINEテスト</button></div></div>' +
       '<div class="card"><div class="stats">' +
       '<div>予約数<b>' + D.total + ' / ' + D.cap + u + '</b></div><div>残り<b>' + Math.max(0, D.cap - D.total) + u + '</b></div>' +
-      '<div>売上（税込）<b>' + yen(sales) + '</b></div><div>支払い済<b>' + yen(paid) + '</b></div><div>未払い<b>' + yen(sales - paid) + '</b></div><div>受渡済<b>' + handed + u + '</b></div>' +
+      '<div>売上（税込）<b>' + yen(sales) + '</b></div><div>支払い済<b>' + yen(paid) + '</b></div><div>未払い<b>' + yen(sales - paid) + '</b></div><div>受渡済<b>' + handed + u + '</b></div>' + ((EX.length || exAll) ? '<div>' + exT + '<b>' + exAll + exU + '</b></div>' : '') +
       '</div><p class="sub">Web受付：' + (c.stopped ? '<span class="pill ng">停止中</span>' : c.open ? '<span class="pill ok">受付中</span>' : '<span class="pill ng">上限に達した</span>') + '</p></div>' +
-      '<div class="card scroll"><b>受取時間ごとの数</b><table><tr><th>時間</th>' + c.dates.map(function (d) { return '<th class="r">' + dl(d) + '</th>'; }).join('') + '</tr>' + slotRows + '</table></div>' +
+      '<div class="card scroll"><b>受取時間ごとの数</b><table><tr><th>時間</th>' + c.dates.map(function (d) { return '<th class="r">' + dl(d) + '</th>'; }).join('') + '</tr>' + slotRows + '</table></div>' + exCard +
       '<details class="card"><summary><b>電話・店頭・LINEの予約を入力する</b></summary><form id="af">' +
       '<div class="row"><div><label for="a-via">受付方法</label><select id="a-via"><option>電話</option><option>店頭</option><option>LINE</option></select></div>' +
-      '<div><label for="a-qty">数</label><input id="a-qty" type="number" min="1" value="1"></div></div>' +
+      '<div><label for="a-qty">' + (EX.length ? esc(c.product) + 'の数' : '数') + '</label><input id="a-qty" type="number" min="' + (EX.length ? 0 : 1) + '" value="1"></div></div>' +
+      (EX.length ? '<div class="row">' + EX.map(function (x, i) { return '<div><label for="a-ex' + i + '">' + esc(x.name) + '<span class="sub">（' + yen(x.price) + '）</span></label><input id="a-ex' + i + '" type="number" min="0" value="0" data-aex="' + esc(x.id) + '"></div>'; }).join('') + '</div>' : '') +
       '<div class="row"><div><label for="a-date">受取日</label><select id="a-date">' + opts + '</select></div><div><label for="a-time">受取時間</label><select id="a-time">' + topts + '</select></div></div>' +
       '<div class="row"><div><label for="a-name">お名前</label><input id="a-name"></div><div><label for="a-tel">電話番号</label><input id="a-tel" type="tel" inputmode="numeric"></div></div>' +
       '<label><input type="checkbox" id="a-paid" style="width:auto"> 前払いでいただいた</label>' +
@@ -69,7 +82,7 @@
         return '<tr class="' + (x.state === '受渡済' ? 'done' : x.state === '取消' ? 'cancel' : '') + '"><td>' + esc(x.no) + '<br><span class="sub">' + esc(x.via) + '</span></td>' +
           '<td>' + dl(x.date) + '<br>' + esc(x.time || '時間未定') + '</td>' +
           '<td>' + esc(x.name) + '<br><a href="tel:' + esc(x.tel) + '">' + esc(x.tel) + '</a>' + (x.note ? '<br><span class="sub">要望：' + esc(x.note) + '</span>' : '') + (x.memo ? '<br><span class="sub">メモ：' + esc(x.memo) + '</span>' : '') + '</td>' +
-          '<td class="r">' + x.qty + '<br><span class="sub">' + yen(x.amount) + '</span></td>' +
+          '<td class="r">' + x.qty + (x.extra ? '<br><span class="sub">' + esc(x.extra) + '</span>' : '') + '<br><span class="sub">' + yen(x.amount) + '</span></td>' +
           '<td><select class="mini" data-pay="' + esc(x.no) + '">' + ['未', '前払い済', '当日払い済'].map(function (p) { return '<option' + (p === x.paid ? ' selected' : '') + '>' + p + '</option>'; }).join('') + '</select></td>' +
           '<td>' + (x.state === '取消' ? '<span class="pill ng">取消</span>' : '<button class="mini" data-hand="' + esc(x.no) + '">' + (x.state === '受渡済' ? '受渡済 ✓' : '受け渡す') + '</button>') + '</td>' +
           '<td>' + (x.state === '取消' ? '' : '<button class="mini" data-edit="' + esc(x.no) + '">変更</button> <button class="mini" data-memo="' + esc(x.no) + '">メモ</button> <button class="mini" data-cancel="' + esc(x.no) + '">取消</button>') + '</td></tr>';
@@ -79,14 +92,22 @@
   }
   function editRow(x) {
     var c = D.cfg;
+    if (!x) return '';
+    var EX = D.extras || [], had = x.ex || [];
+    // 予約に入っている商品が一覧にない（名前を変えた）ときは、ここでは追加商品を直さない
+    var lost = had.some(function (e) { return !EX.some(function (y) { return y.name === e.name; }); });
+    var exIn = lost ? '<p class="sub">' + esc(c.extraTitle || 'ピザ') + '：' + esc(x.extra) + '（商品名が変わったため、ここでは変更できません）</p>' :
+      EX.length ? '<div class="row">' + EX.map(function (y, i) {
+        var n = (had.filter(function (e) { return e.name === y.name; })[0] || { n: 0 }).n;
+        return '<div><label for="e-ex' + i + '">' + esc(y.name) + '<span class="sub">（' + yen(y.price) + '）</span></label><input id="e-ex' + i + '" type="number" min="0" value="' + n + '" data-eex="' + esc(y.id) + '"></div>';
+      }).join('') + '</div>' : '';
     var dO = c.dates.map(function (d) { return '<option value="' + d + '"' + (d === x.date ? ' selected' : '') + '>' + dl(d) + '</option>'; }).join('');
     var tO = '<option value="">時間未定</option>' + c.times.map(function (t) { return '<option' + (t === x.time ? ' selected' : '') + '>' + esc(t) + '</option>'; }).join('');
-    if (!x) return '';
     return '<form class="card" id="ef" style="border-color:var(--main)"><b>' + esc(x.no) + ' を変更</b>' +
-      '<div class="row"><div><label for="e-qty">数</label><input id="e-qty" type="number" min="1" value="' + x.qty + '"></div>' +
+      '<div class="row"><div><label for="e-qty">' + (EX.length ? esc(c.product) + 'の数' : '数') + '</label><input id="e-qty" type="number" min="' + (EX.length ? 0 : 1) + '" value="' + x.qty + '"></div>' +
       '<div><label for="e-date">受取日</label><select id="e-date">' + dO + '</select></div><div><label for="e-time">受取時間</label><select id="e-time">' + tO + '</select></div></div>' +
       '<div class="row"><div><label for="e-name">お名前</label><input id="e-name" value="' + esc(x.name) + '"></div><div><label for="e-tel">電話番号</label><input id="e-tel" type="tel" value="' + esc(x.tel) + '"></div></div>' +
-      '<label for="e-note">ご要望</label><input id="e-note" value="' + esc(x.note) + '">' +
+      exIn + '<label for="e-note">ご要望</label><input id="e-note" value="' + esc(x.note) + '">' +
       '<p class="err" id="e-err"></p><div class="row"><button class="btn" style="margin-top:8px">保存する</button><button class="btn sub2" type="button" id="e-no" style="margin-top:8px">やめる</button></div></form>';
   }
   function nav() {
@@ -245,7 +266,10 @@
         e.preventDefault();
         var v = function (id) { return document.getElementById(id).value.trim(); };
         var btn = ef.querySelector('.btn'); btn.disabled = true; btn.textContent = '保存しています…';
-        call({ op: 'edit', no: editNo, qty: +v('e-qty'), date: v('e-date'), time: v('e-time'), name: v('e-name'), tel: v('e-tel'), note: v('e-note') })
+        var ed = { op: 'edit', no: editNo, qty: +v('e-qty'), date: v('e-date'), time: v('e-time'), name: v('e-name'), tel: v('e-tel'), note: v('e-note') };
+        var eex = ef.querySelectorAll('[data-eex]');
+        if (eex.length) { ed.items = {}; eex.forEach(function (el) { if (+el.value > 0) ed.items[el.dataset.eex] = +el.value; }); }
+        call(ed)
           .then(function (r) {
             if (!r.ok) { btn.disabled = false; btn.textContent = '保存する'; document.getElementById('e-err').textContent = r.error; return; }
             if (r.over) alert('保存しました。※合計が上限数を超えています');
@@ -258,7 +282,9 @@
       e.preventDefault();
       var v = function (id) { return document.getElementById(id).value.trim(); };
       var btn = this.querySelector('.btn'); btn.disabled = true;
-      call({ op: 'add', via: v('a-via'), qty: +v('a-qty'), date: v('a-date'), time: v('a-time'), name: v('a-name'), tel: v('a-tel'),
+      var items = {};
+      app.querySelectorAll('[data-aex]').forEach(function (el) { if (+el.value > 0) items[el.dataset.aex] = +el.value; });
+      call({ op: 'add', via: v('a-via'), qty: +v('a-qty'), items: items, date: v('a-date'), time: v('a-time'), name: v('a-name'), tel: v('a-tel'),
         paid: document.getElementById('a-paid').checked, note: v('a-note'), memo: v('a-memo'), rid: Math.random().toString(16).slice(2, 12) })
         .then(function (r) {
           if (!r.ok) { btn.disabled = false; document.getElementById('a-err').textContent = r.error; return; }
