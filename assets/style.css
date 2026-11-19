@@ -62,3 +62,6 @@ th{color:var(--sub);font-weight:500;font-size:.8rem}
 .exrow>div{flex:1 1 auto}
 .exrow select{flex:0 0 96px;width:96px}
 .sum{font-weight:700;font-size:1.1rem;text-align:right;margin:12px 0 0}
+.scanbox{border:1px dashed var(--line);border-radius:8px;padding:10px;margin-top:12px}
+.scanimg{display:block;max-width:100%;max-height:440px;margin-top:8px;border:1px solid var(--line);border-radius:8px}
+.warn{background:#fff3c4;border-color:var(--accent)}

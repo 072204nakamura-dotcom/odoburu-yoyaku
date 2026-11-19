@@ -59,13 +59,15 @@
     var topts = '<option value="">時間未定</option>' + c.times.map(function (t) { return '<option>' + esc(t) + '</option>'; }).join('');
     app.innerHTML =
       nav() + '<div class="row"><div><div class="shop">' + esc(c.shop) + '</div><h1>' + esc(c.product) + ' 予約管理</h1></div>' +
-      '<div style="flex:0 0 auto" class="row"><button class="mini" id="rl">更新</button><button class="mini" id="op">' + (c.stopped ? 'Web受付を再開' : 'Web受付を停止') + '</button><button class="mini" id="tl">LINEテスト</button></div></div>' +
+      '<div style="flex:0 0 auto" class="row"><button class="mini" id="rl">更新</button><button class="mini" id="op">' + (c.stopped ? 'Web受付を再開' : 'Web受付を停止') + '</button><button class="mini" id="tl">LINEテスト</button><a class="mini" href="sheet.html" target="_blank" rel="noopener" style="text-decoration:none;color:inherit">紙の予約表を印刷</a></div></div>' +
       '<div class="card"><div class="stats">' +
       '<div>予約数<b>' + D.total + ' / ' + D.cap + u + '</b></div><div>残り<b>' + Math.max(0, D.cap - D.total) + u + '</b></div>' +
       '<div>売上（税込）<b>' + yen(sales) + '</b></div><div>支払い済<b>' + yen(paid) + '</b></div><div>未払い<b>' + yen(sales - paid) + '</b></div><div>受渡済<b>' + handed + u + '</b></div>' + ((EX.length || exAll) ? '<div>' + exT + '<b>' + exAll + exU + '</b></div>' : '') +
       '</div><p class="sub">Web受付：' + (c.stopped ? '<span class="pill ng">停止中</span>' : c.open ? '<span class="pill ok">受付中</span>' : '<span class="pill ng">上限に達した</span>') + '</p></div>' +
       '<div class="card scroll"><b>受取時間ごとの数</b><table><tr><th>時間</th>' + c.dates.map(function (d) { return '<th class="r">' + dl(d) + '</th>'; }).join('') + '</tr>' + slotRows + '</table></div>' + exCard +
-      '<details class="card"><summary><b>電話・店頭・LINEの予約を入力する</b></summary><form id="af">' +
+      '<details class="card" id="addbox"><summary><b>電話・店頭・LINEの予約を入力する</b></summary><form id="af">' +
+      (D.scan ? '<div class="scanbox"><label class="mini" for="scan-f" style="display:inline-block;margin:0;font-weight:700">📷 紙の予約表を写真で読み取る</label><input type="file" id="scan-f" accept="image/*" capture="environment" hidden>' +
+        '<p class="sub" id="scan-msg" style="margin:6px 0 0">紙の予約表を撮ると、下の欄に内容が入ります。登録はされないので、紙と見比べてから「予約を登録」を押してください。</p><img id="scan-img" class="scanimg" alt="読み取った予約表の写真" hidden></div>' : '') +
       '<div class="row"><div><label for="a-via">受付方法</label><select id="a-via"><option>電話</option><option>店頭</option><option>LINE</option></select></div>' +
       '<div><label for="a-qty">' + (EX.length ? esc(c.product) + 'の数' : '数') + '</label><input id="a-qty" type="number" min="' + (EX.length ? 0 : 1) + '" value="1"></div></div>' +
       (EX.length ? '<div class="row">' + EX.map(function (x, i) { return '<div><label for="a-ex' + i + '">' + esc(x.name) + '<span class="sub">（' + yen(x.price) + '）</span></label><input id="a-ex' + i + '" type="number" min="0" value="0" data-aex="' + esc(x.id) + '"></div>'; }).join('') + '</div>' : '') +
@@ -246,6 +248,50 @@
       });
     };
   }
+  // 紙の予約表の写真を小さくしてGASへ送り、AIが読み取った内容を入力欄に入れる（登録はしない）
+  function scan(file) {
+    var msg = document.getElementById('scan-msg'), img = document.getElementById('scan-img');
+    var say = function (t, bad) { msg.textContent = t; msg.className = bad ? 'err' : 'sub'; };
+    say('写真を準備しています…');
+    var url = URL.createObjectURL(file), im = new Image();
+    im.onerror = function () { say('この写真は開けませんでした。もう一度撮ってください。', true); };
+    im.onload = function () {
+      var k = Math.min(1, 1600 / Math.max(im.width, im.height)), cv = document.createElement('canvas');
+      cv.width = Math.round(im.width * k); cv.height = Math.round(im.height * k);
+      cv.getContext('2d').drawImage(im, 0, 0, cv.width, cv.height);
+      var data = cv.toDataURL('image/jpeg', 0.85);
+      URL.revokeObjectURL(url);
+      img.src = data; img.hidden = false;
+      var rid = 's' + Date.now().toString(36) + Math.random().toString(16).slice(2, 8), tries = 0;
+      say('読み取っています…（10〜20秒かかります）');
+      var poll = function () {
+        tries++;
+        call({ op: 'scanResult', rid: rid }).then(function (r) {
+          if (r && r.done) return fill(r.result);
+          if (tries > 30) return say('読み取りの返事がありませんでした。もう一度撮るか、手で入力してください。', true);
+          setTimeout(poll, 2500);
+        }).catch(function () { if (tries > 30) say('電波を確認して、もう一度お試しください。', true); else setTimeout(poll, 2500); });
+      };
+      // 写真は大きいのでPOSTで送る（返事は読めない送り方なので、結果は上の poll で取りに行く）
+      fetch(API, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ pass: pass, op: 'scan', rid: rid, image: data }) })
+        .then(poll).catch(function () { say('写真を送れませんでした。電波を確認して、もう一度お試しください。', true); });
+    };
+    im.src = url;
+    function fill(r) {
+      if (!r || !r.ok) return say((r && r.error) || '読み取れませんでした。', true);
+      var d = r.data, un = r.unsure || [], el = function (id) { return document.getElementById(id); };
+      app.querySelectorAll('#af .warn').forEach(function (x) { x.classList.remove('warn'); });
+      var set = function (id, v, key) { var x = el(id); if (!x) return; x.value = v; if (un.indexOf(key) >= 0) x.classList.add('warn'); };
+      set('a-via', d.via, 'via'); set('a-qty', d.qty, 'qty'); set('a-name', d.name, 'name'); set('a-tel', d.tel, 'tel');
+      if (d.date) set('a-date', d.date, 'date'); else el('a-date').classList.add('warn');
+      set('a-time', d.time, 'time'); if (!d.time) el('a-time').classList.add('warn');
+      set('a-note', d.note, 'note');
+      set('a-memo', ['紙の予約表', d.no, d.memo].filter(String).join(' '), 'memo');
+      el('a-paid').checked = !!d.paid;
+      app.querySelectorAll('[data-aex]').forEach(function (x) { x.value = (d.items || {})[x.dataset.aex] || 0; if (un.indexOf('items') >= 0) x.classList.add('warn'); });
+      say('読み取りました。' + (app.querySelectorAll('#af .warn').length ? '黄色の欄は自信がありません。' : '') + 'まだ登録していません。写真や紙と見比べて直してから「予約を登録」を押してください。');
+    }
+  }
   function upd(d, done) { call(Object.assign({ op: 'update' }, d)).then(function (r) { if (!r.ok) alert(r.error); load(); }); }
   function bind() {
     bindNav();
@@ -278,6 +324,8 @@
       };
     }
     app.querySelectorAll('[data-memo]').forEach(function (b) { b.onclick = function () { var x = D.list.filter(function (y) { return y.no === b.dataset.memo; })[0]; var m = prompt('店のメモ', x.memo); if (m !== null) upd({ no: x.no, memo: m }); }; });
+    var sf = document.getElementById('scan-f');
+    if (sf) sf.onchange = function () { if (sf.files && sf.files[0]) scan(sf.files[0]); sf.value = ''; };
     document.getElementById('af').onsubmit = function (e) {
       e.preventDefault();
       var v = function (id) { return document.getElementById(id).value.trim(); };
