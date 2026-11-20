@@ -128,20 +128,21 @@
             '<p class="sub">受付番号</p><p class="big">' + esc(r.no) + '</p>' +
             '<p>' + dl(sel.date) + ' ' + esc(sel.time) + ' に ' + esc(cfg.place) + ' でお渡しします。<br>' +
             (exCount() ? lines().join('<br>') + '<br>合計 ' : lines().join('') + '　') + yen(total()) + '（税込）</p>' +
-            '<p class="sub">この画面を保存（スクリーンショット）しておいてください。' + (cfg.telCancel ? 'キャンセルは、このページを開き直して下の「ご予約のキャンセルはこちら」から、お電話番号でできます。変更はお電話で：' : '変更・キャンセルはお電話で：') + esc(cfg.tel) + '</p></div>';
+            '<p class="sub">この画面を保存（スクリーンショット）しておいてください。' + (cfg.telCancel ? 'キャンセルは、このページを開き直して下の「ご予約のキャンセルはこちら」から、お電話番号とお名前でできます。変更はお電話で：' : '変更・キャンセルはお電話で：') + esc(cfg.tel) + '</p></div>';
         })
         .catch(function () { form('送信できたか確認できませんでした。お手数ですがお電話（' + cfg.tel + '）でご確認ください。'); });
     };
   }
   function bindFoot() { var a = document.getElementById('cl'); if (a) a.onclick = function (e) { e.preventDefault(); cancelView(); }; }
-  var cx = { no: '', tel: '' };
+  var cx = { no: '', tel: '', name: '' };
   function what(r) { return [r.qty > 0 ? esc(r.product) + ' × ' + r.qty + esc(r.unit) : '', esc(r.extra || '')].filter(String).join('<br>'); }
   function cancelView(msg) {
     app.innerHTML = head() + '<form class="card" id="cf"><b>ご予約のキャンセル</b>' +
-      '<p class="sub">' + (cfg.telCancel ? 'ご予約のときのお電話番号を入れてください。受付番号がわかる場合は、受付番号も入れてください。' : 'ご予約のときに出た受付番号と、ご予約のお電話番号を入れてください。') +
+      '<p class="sub">' + (cfg.telCancel ? 'ご予約のときのお電話番号とお名前を入れてください。受付番号がわかる場合は、受付番号も入れてください。' : 'ご予約のときに出た受付番号と、ご予約のお電話番号を入れてください。') +
       (cfg.cancelBy ? '<br>フォームからのキャンセルは ' + esc(cfg.cancelBy) + ' までです。' : '') +
       '<br>前払いいただいたご予約は、お電話（' + esc(cfg.tel) + '）でご連絡ください。</p>' +
       '<label for="c-tel">電話番号</label><input id="c-tel" type="tel" inputmode="numeric" placeholder="09012345678" value="' + esc(cx.tel) + '">' +
+      (cfg.telCancel ? '<label for="c-nm">お名前</label><input id="c-nm" autocomplete="name" placeholder="ご予約のときと同じ書き方で" value="' + esc(cx.name) + '">' : '') +
       '<label for="c-no">受付番号' + (cfg.telCancel ? '（わかる場合だけ）' : '') + '</label><input id="c-no" placeholder="例：N1109-001" autocapitalize="characters" value="' + esc(cx.no) + '">' +
       (msg ? '<p class="err">' + esc(msg) + '</p>' : '') +
       '<button class="btn">ご予約を確認する</button><button class="btn sub2" type="button" id="cb">予約の画面に戻る</button></form>';
@@ -149,12 +150,14 @@
     document.getElementById('cf').onsubmit = function (e) {
       e.preventDefault();
       cx.no = document.getElementById('c-no').value.trim(); cx.tel = document.getElementById('c-tel').value.trim();
+      var nmEl = document.getElementById('c-nm'); cx.name = nmEl ? nmEl.value.trim() : '';
+      if (cfg.telCancel && !cx.no && !cx.name) return cancelView('お名前を入れてください');
       var btn = this.querySelector('.btn'); btn.disabled = true; btn.textContent = '確認しています…';
       lookup();
     };
   }
   function lookup() {
-    call('lookup', { no: cx.no, tel: cx.tel }).then(function (r) {
+    call('lookup', { no: cx.no, tel: cx.tel, name: cx.name }).then(function (r) {
       if (!r.ok) return cancelView(r.error);
       if (r.many) return chooseView(r);
       confirmView(r);
@@ -186,7 +189,7 @@
     document.getElementById('cno').onclick = function () { form(); };
     document.getElementById('cgo').onclick = function () {
       this.disabled = true; this.textContent = '送信しています…';
-      call('cancel', { no: cx.no, tel: cx.tel }).then(function (r2) {
+      call('cancel', { no: cx.no, tel: cx.tel, name: cx.name }).then(function (r2) {
         if (!r2.ok) return cancelView(r2.error);
         cx.no = '';
         app.innerHTML = head() + '<div class="card"><p><b>' + esc(r2.no) + ' のご予約をキャンセルしました。</b></p>' +
