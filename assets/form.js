@@ -128,20 +128,21 @@
             '<p class="sub">受付番号</p><p class="big">' + esc(r.no) + '</p>' +
             '<p>' + dl(sel.date) + ' ' + esc(sel.time) + ' に ' + esc(cfg.place) + ' でお渡しします。<br>' +
             (exCount() ? lines().join('<br>') + '<br>合計 ' : lines().join('') + '　') + yen(total()) + '（税込）</p>' +
-            '<p class="sub">この画面を保存（スクリーンショット）しておいてください。変更・キャンセルはお電話で：' + esc(cfg.tel) + '</p></div>';
+            '<p class="sub">この画面を保存（スクリーンショット）しておいてください。' + (cfg.telCancel ? 'キャンセルは、このページを開き直して下の「ご予約のキャンセルはこちら」から、お電話番号でできます。変更はお電話で：' : '変更・キャンセルはお電話で：') + esc(cfg.tel) + '</p></div>';
         })
         .catch(function () { form('送信できたか確認できませんでした。お手数ですがお電話（' + cfg.tel + '）でご確認ください。'); });
     };
   }
   function bindFoot() { var a = document.getElementById('cl'); if (a) a.onclick = function (e) { e.preventDefault(); cancelView(); }; }
   var cx = { no: '', tel: '' };
+  function what(r) { return [r.qty > 0 ? esc(r.product) + ' × ' + r.qty + esc(r.unit) : '', esc(r.extra || '')].filter(String).join('<br>'); }
   function cancelView(msg) {
     app.innerHTML = head() + '<form class="card" id="cf"><b>ご予約のキャンセル</b>' +
-      '<p class="sub">ご予約のときに出た受付番号と、ご予約のお電話番号を入れてください。' +
+      '<p class="sub">' + (cfg.telCancel ? 'ご予約のときのお電話番号を入れてください。受付番号がわかる場合は、受付番号も入れてください。' : 'ご予約のときに出た受付番号と、ご予約のお電話番号を入れてください。') +
       (cfg.cancelBy ? '<br>フォームからのキャンセルは ' + esc(cfg.cancelBy) + ' までです。' : '') +
       '<br>前払いいただいたご予約は、お電話（' + esc(cfg.tel) + '）でご連絡ください。</p>' +
-      '<label for="c-no">受付番号</label><input id="c-no" placeholder="例：N1109-001" autocapitalize="characters" value="' + esc(cx.no) + '">' +
-      '<label for="c-tel">電話番号</label><input id="c-tel" type="tel" inputmode="numeric" value="' + esc(cx.tel) + '">' +
+      '<label for="c-tel">電話番号</label><input id="c-tel" type="tel" inputmode="numeric" placeholder="09012345678" value="' + esc(cx.tel) + '">' +
+      '<label for="c-no">受付番号' + (cfg.telCancel ? '（わかる場合だけ）' : '') + '</label><input id="c-no" placeholder="例：N1109-001" autocapitalize="characters" value="' + esc(cx.no) + '">' +
       (msg ? '<p class="err">' + esc(msg) + '</p>' : '') +
       '<button class="btn">ご予約を確認する</button><button class="btn sub2" type="button" id="cb">予約の画面に戻る</button></form>';
     document.getElementById('cb').onclick = function () { form(); };
@@ -149,25 +150,49 @@
       e.preventDefault();
       cx.no = document.getElementById('c-no').value.trim(); cx.tel = document.getElementById('c-tel').value.trim();
       var btn = this.querySelector('.btn'); btn.disabled = true; btn.textContent = '確認しています…';
-      call('lookup', { no: cx.no, tel: cx.tel }).then(function (r) {
-        if (!r.ok) return cancelView(r.error);
-        var what = [r.qty > 0 ? esc(r.product) + ' × ' + r.qty + esc(r.unit) : '', esc(r.extra || '')].filter(String).join('<br>');
-        app.innerHTML = head() + '<div class="card"><b>このご予約をキャンセルしますか？</b><table>' +
-          '<tr><th>受付番号</th><td>' + esc(r.no) + '</td></tr>' +
-          '<tr><th>内容</th><td>' + what + '　' + yen(r.amount) + '</td></tr>' +
-          '<tr><th>受取</th><td>' + dl(r.date) + ' ' + esc(r.time || '時間未定') + '</td></tr></table>' +
-          '<button class="btn" id="cgo" style="background:var(--ng)">キャンセルする</button><button class="btn sub2" id="cno">やめる</button></div>';
-        document.getElementById('cno').onclick = function () { form(); };
-        document.getElementById('cgo').onclick = function () {
-          this.disabled = true; this.textContent = '送信しています…';
-          call('cancel', { no: cx.no, tel: cx.tel }).then(function (r2) {
-            if (!r2.ok) return cancelView(r2.error);
-            app.innerHTML = head() + '<div class="card"><p><b>' + esc(r2.no) + ' のご予約をキャンセルしました。</b></p>' +
-              '<p class="sub">またのご利用をお待ちしております。</p><button class="btn sub2" id="cbk">予約の画面に戻る</button></div>';
-            document.getElementById('cbk').onclick = function () { load(); };
-          }).catch(function () { cancelView('送信できたか確認できませんでした。お手数ですがお電話（' + cfg.tel + '）でご確認ください。'); });
-        };
-      }).catch(function () { cancelView('読み込めませんでした。電波の良い所でもう一度お試しください。'); });
+      lookup();
+    };
+  }
+  function lookup() {
+    call('lookup', { no: cx.no, tel: cx.tel }).then(function (r) {
+      if (!r.ok) return cancelView(r.error);
+      if (r.many) return chooseView(r);
+      confirmView(r);
+    }).catch(function () { cancelView('読み込めませんでした。電波の良い所でもう一度お試しください。'); });
+  }
+  // 同じ電話番号のご予約が2件以上あるとき：どれを取り消すか選んでもらう
+  function chooseView(r) {
+    app.innerHTML = head() + '<div class="card"><b>この電話番号のご予約が ' + r.list.length + '件あります</b>' +
+      '<p class="sub">キャンセルするご予約を選んでください。</p>' +
+      r.list.map(function (x, i) {
+        x.unit = r.unit; x.product = r.product;
+        return '<table><tr><th>受付番号</th><td>' + esc(x.no) + '</td></tr>' +
+          '<tr><th>内容</th><td>' + what(x) + '　' + yen(x.amount) + '</td></tr>' +
+          '<tr><th>受取</th><td>' + dl(x.date) + ' ' + esc(x.time || '時間未定') + '</td></tr></table>' +
+          '<button class="btn sub2" data-pick="' + i + '">このご予約を選ぶ</button>';
+      }).join('') + '<button class="btn sub2" id="cno">やめる</button></div>';
+    document.getElementById('cno').onclick = function () { form(); };
+    app.querySelectorAll('[data-pick]').forEach(function (b) {
+      b.onclick = function () { cx.no = r.list[+b.dataset.pick].no; b.disabled = true; b.textContent = '確認しています…'; lookup(); };
+    });
+  }
+  function confirmView(r) {
+    cx.no = r.no; // ここから先は受付番号で1件に決める
+    app.innerHTML = head() + '<div class="card"><b>このご予約をキャンセルしますか？</b><table>' +
+      '<tr><th>受付番号</th><td>' + esc(r.no) + '</td></tr>' +
+      '<tr><th>内容</th><td>' + what(r) + '　' + yen(r.amount) + '</td></tr>' +
+      '<tr><th>受取</th><td>' + dl(r.date) + ' ' + esc(r.time || '時間未定') + '</td></tr></table>' +
+      '<button class="btn" id="cgo" style="background:var(--ng)">キャンセルする</button><button class="btn sub2" id="cno">やめる</button></div>';
+    document.getElementById('cno').onclick = function () { form(); };
+    document.getElementById('cgo').onclick = function () {
+      this.disabled = true; this.textContent = '送信しています…';
+      call('cancel', { no: cx.no, tel: cx.tel }).then(function (r2) {
+        if (!r2.ok) return cancelView(r2.error);
+        cx.no = '';
+        app.innerHTML = head() + '<div class="card"><p><b>' + esc(r2.no) + ' のご予約をキャンセルしました。</b></p>' +
+          '<p class="sub">またのご利用をお待ちしております。</p><button class="btn sub2" id="cbk">予約の画面に戻る</button></div>';
+        document.getElementById('cbk').onclick = function () { load(); };
+      }).catch(function () { cancelView('送信できたか確認できませんでした。お手数ですがお電話（' + cfg.tel + '）でご確認ください。'); });
     };
   }
   load();
